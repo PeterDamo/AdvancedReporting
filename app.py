@@ -358,24 +358,44 @@ if __name__ == "__main__":
                 # Scegli la colonna numerica da analizzare
                 cols_to_analyze = df_analysis.select_dtypes(include=['number']).columns.tolist()
                 
-                if not cols_to_analyze:
+if not cols_to_analyze:
                     st.warning("Seleziona una colonna con dati numerici per l'analisi.")
+                    can_analyze = False
                 else:
-                    # Assumiamo di analizzare la prima colonna numerica trovata o quella metrica
+                    can_analyze = True
                     
+                    # Definisce la colonna su cui fare l'analisi (metric_col, SUM_metric_col o la prima numerica)
                     if metric_col != "Nessuno":
                         col_for_analysis = metric_col
                     elif groupby_col != "Nessuno":
-                         # Se c'è group by, il nome della colonna metrica è 'SUM_...'
                          col_for_analysis = f'SUM_{metric_col}'
                     elif cols_to_analyze:
                         col_for_analysis = cols_to_analyze[0]
                     else:
                         st.warning("Nessuna colonna numerica da analizzare.")
-                        # Usciamo dal blocco else e non eseguiamo i calcoli successivi
-                        return  # <-- Questa riga DEVE stare qui, se l'hai messa sopra era sbagliata!
-
-                   # ... (continua con i calcoli)
+                        can_analyze = False
+                    
+                
+                # ESECUZIONE DEI CALCOLI SOLO SE LA VARIABILE FLAG E' TRUE
+                if can_analyze:
+                    # Calcoli
+                    total_sum = df_analysis[col_for_analysis].sum()
+                    average = df_analysis[col_for_analysis].mean()
+                    
+                    # Calcolo della variazione percentuale (rispetto al totale del report NON selezionato)
+                    total_report_value = df_display[col_for_analysis].sum()
+                    if total_report_value != 0:
+                        percent_diff = (total_sum / total_report_value) * 100
+                    else:
+                        percent_diff = 0
+                        
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(f"Totale Selezionato ({col_for_analysis})", f"{total_sum:,.2f} €")
+                    c2.metric("Media Selezionata", f"{average:,.2f} €")
+                    c3.metric("% sul Totale Report", f"{percent_diff:,.2f} %")
+                    
+                    st.markdown(f"*(Analisi basata sulla colonna: **{col_for_analysis}**)*")
 
 
                     # Calcoli
@@ -410,4 +430,5 @@ if __name__ == "__main__":
             st.info("Nessun dato finale disponibile per il report. Esegui prima un Join o carica una tabella.")
 
 # ... (CODICE SEGUENTE)
+
 
