@@ -372,7 +372,10 @@ if __name__ == "__main__":
                         col_for_analysis = cols_to_analyze[0]
                     else:
                         st.warning("Nessuna colonna numerica da analizzare.")
-                        return
+                        # Usciamo dal blocco else e non eseguiamo i calcoli successivi
+                        return  # <-- Questa riga DEVE stare qui, se l'hai messa sopra era sbagliata!
+
+                   # ... (continua con i calcoli)
 
 
                     # Calcoli
@@ -407,3 +410,4 @@ if __name__ == "__main__":
             st.info("Nessun dato finale disponibile per il report. Esegui prima un Join o carica una tabella.")
 
 # ... (CODICE SEGUENTE)
+
