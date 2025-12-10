@@ -278,3 +278,132 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# ... (CODICE PRECEDENTE)
+
+    # =========================================================================
+    # TAB 3: FINAL REPORTING & ANALYSIS
+    # =========================================================================
+    with tab_reporting:
+        st.header("3. Reporting e Analisi Finale")
+        
+        # Selezione del dataset per il report
+        report_tables = list(manager.get_all_tables().keys())
+        if 'last_result_name' in st.session_state and st.session_state['last_result_name'] in report_tables:
+            default_idx = report_tables.index(st.session_state['last_result_name'])
+        else:
+            default_idx = 0
+            
+        if report_tables:
+            df_final_name = st.selectbox("Seleziona il dataset per il Report:", report_tables, index=default_idx)
+            df_res = manager.get_data(df_final_name).copy()
+            
+            st.subheader(f"Report: {df_final_name}")
+            
+            # --- Filtri, Raggruppamento e Somme sulla Tabella Finale ---
+            with st.expander("🛠 Opzioni Filtri, Raggruppamento e Calcoli"):
+                
+                # Filtri Dinamici
+                filter_col = st.selectbox("Filtra Report per colonna:", ["Nessuno"] + list(df_res.columns))
+                if filter_col != "Nessuno":
+                    unique_vals = df_res[filter_col].unique()
+                    selected_vals = st.multiselect(f"Valori per {filter_col}", unique_vals, default=unique_vals)
+                    df_res = df_res[df_res[filter_col].isin(selected_vals)]
+                
+                col_group, col_agg = st.columns(2)
+                
+                with col_group:
+                    groupby_col = st.selectbox("Raggruppa Report per:", ["Nessuno"] + list(df_res.columns))
+
+                with col_agg:
+                    numeric_cols = df_res.select_dtypes(include=['number']).columns
+                    metric_col = st.selectbox("Colonna Metrica per Somma/Aggregazione", ["Nessuno"] + list(numeric_cols))
+            
+            # Calcolo aggregazioni (Group By) se richiesto
+            if groupby_col != "Nessuno" and metric_col != "Nessuno":
+                df_display = df_res.groupby(groupby_col)[metric_col].sum().reset_index()
+                df_display = df_display.rename(columns={metric_col: f'SUM_{metric_col}'})
+            else:
+                df_display = df_res
+
+            
+            # --- NUOVA FUNZIONALITÀ: SELEZIONE E ANALISI IMMEDIATA ---
+
+            st.markdown("---")
+            st.markdown("### 🔍 Analisi Veloce (Seleziona le righe nella tabella sottostante)")
+            
+            # 1. Visualizzazione Tabella Dinamica con selezione righe
+            # Ho cambiato st.dataframe in st.data_editor per includere la selezione di riga
+            table_with_selection = st.data_editor(
+                df_display, 
+                use_container_width=True,
+                key="final_report_table", # Chiave per tracciare la selezione
+                # Aggiunge la casella di controllo per la selezione delle righe
+                column_config={"__index__": st.column_config.CheckboxColumn("Seleziona", default=False)}, 
+                hide_index=True
+            )
+            
+            # 2. Ottieni gli indici delle righe selezionate
+            # Quando si usa la checkbox, le righe selezionate sono quelle con valore True in "__index__"
+            selected_rows_indices = table_with_selection[table_with_selection['Seleziona'] == True].index
+            
+            
+            if len(selected_rows_indices) > 0:
+                # Recupera i dati delle righe selezionate dal dataframe originale prima dell'eventuale group-by
+                # Se è stato fatto un group by, usiamo df_display, altrimenti df_res (filtrato)
+                df_analysis = df_display.loc[selected_rows_indices]
+                
+                st.subheader("Risultati della Selezione")
+                
+                # Scegli la colonna numerica da analizzare
+                cols_to_analyze = df_analysis.select_dtypes(include=['number']).columns.tolist()
+                
+                if not cols_to_analyze:
+                    st.warning("Seleziona una colonna con dati numerici per l'analisi.")
+                else:
+                    # Assumiamo di analizzare la prima colonna numerica trovata o quella metrica
+                    
+                    if metric_col != "Nessuno":
+                        col_for_analysis = metric_col
+                    elif groupby_col != "Nessuno":
+                         # Se c'è group by, il nome della colonna metrica è 'SUM_...'
+                         col_for_analysis = f'SUM_{metric_col}'
+                    elif cols_to_analyze:
+                        col_for_analysis = cols_to_analyze[0]
+                    else:
+                        st.warning("Nessuna colonna numerica da analizzare.")
+                        return
+
+
+                    # Calcoli
+                    total_sum = df_analysis[col_for_analysis].sum()
+                    average = df_analysis[col_for_analysis].mean()
+                    
+                    # Calcolo della variazione percentuale (rispetto al totale del report NON selezionato)
+                    # Non è sempre una metrica utile in un subset, ma la calcoliamo come richiesto.
+                    
+                    total_report_value = df_display[col_for_analysis].sum()
+                    if total_report_value != 0:
+                        percent_diff = (total_sum / total_report_value) * 100
+                    else:
+                        percent_diff = 0
+                        
+                    
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric(f"Totale Selezionato ({col_for_analysis})", f"{total_sum:,.2f} €")
+                    c2.metric("Media Selezionata", f"{average:,.2f} €")
+                    c3.metric("% sul Totale Report", f"{percent_diff:,.2f} %")
+                    
+                    st.markdown(f"*(Analisi basata sulla colonna: **{col_for_analysis}**)*")
+
+            else:
+                st.info("Seleziona le righe che ti interessano nella tabella per vedere l'analisi immediata.")
+            
+            # Download
+            csv = df_display.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Scarica Report CSV", csv, "final_report.csv", "text/csv")
+        
+        else:
+            st.info("Nessun dato finale disponibile per il report. Esegui prima un Join o carica una tabella.")
+
+# ... (CODICE SEGUENTE)
