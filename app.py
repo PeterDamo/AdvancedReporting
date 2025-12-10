@@ -1,18 +1,20 @@
 import streamlit as st
 import pandas as pd
 from thefuzz import fuzz
+import io
 
 # --- CONFIGURAZIONE PAGINA ---
-st.set_page_config(page_title="SAP Smart Reporter", layout="wide")
+st.set_page_config(page_title="Advanced Smart Reporter", layout="wide")
 
 # --- 1. CLASSI E FUNZIONI DI BACKEND ---
 
 class DataSourceManager:
     def __init__(self):
+        # Data store per le tabelle pre-elaborate (da Excel, SAP, o unione iniziale)
         if 'data_store' not in st.session_state:
-            st.session_state.data_store = {} # Dizionario: {'nome_tabella': dataframe}
+            st.session_state.data_store = {}
         if 'metadata' not in st.session_state:
-            st.session_state.metadata = {}   # Dizionario: {'nome_tabella': {'dominio': '...', 'alias': '...'}}
+            st.session_state.metadata = {}
 
     def add_dataframe(self, name, df, domain, alias):
         st.session_state.data_store[name] = df
@@ -24,18 +26,16 @@ class DataSourceManager:
     def get_all_tables(self):
         return st.session_state.metadata
 
-# Funzione simulata per SAP (Sostituire con hdbcli reale)
 def fetch_sap_cds_view(view_name):
-    # Dati finti per demo
+    # Dati finti per demo SAP
     data = {
-        'BillingDocument': ['90001', '90002', '90003'],
+        'BillingDoc': ['90001', '90002', '90003'],
         'CustomerID': ['C100', 'C200', 'C100'],
-        'Amount': [1000, 500, 750],
+        'SalesAmount': [1000.50, 500.20, 750.00],
         'Currency': ['EUR', 'EUR', 'USD']
     }
     return pd.DataFrame(data)
 
-# Funzione per suggerire Join (Smart Logic)
 def suggest_join_keys(df1, df2):
     cols1 = df1.columns.tolist()
     cols2 = df2.columns.tolist()
@@ -43,124 +43,238 @@ def suggest_join_keys(df1, df2):
     
     for c1 in cols1:
         for c2 in cols2:
-            # Usa Levenshtein distance per trovare similarità
             ratio = fuzz.ratio(c1.lower(), c2.lower())
-            if ratio > 80: # Se sono simili all'80%
+            if ratio > 80:
                 suggestions.append((c1, c2, ratio))
     
-    # Ordina per similarità
     suggestions.sort(key=lambda x: x[2], reverse=True)
     return suggestions
 
 # --- 2. INTERFACCIA UTENTE (UI) ---
 
 def main():
-    st.title("📊 SAP S/4HANA & Excel Smart Reporter")
     manager = DataSourceManager()
 
-    # --- SIDEBAR: INGESTION DATI ---
-    with st.sidebar:
-        st.header("1. Data Ingestion")
+    st.title("📊 Advanced SAP & Excel Smart Reporter")
+
+    # Creazione delle schede di navigazione
+    tab_ingestion, tab_modeling, tab_reporting = st.tabs([
+        "1. Ingestion & Pre-Processing", 
+        "2. Data Modeling & Join", 
+        "3. Final Reporting & Analysis"
+    ])
+
+    # =========================================================================
+    # TAB 1: INGESTION & PRE-PROCESSING
+    # =========================================================================
+    with tab_ingestion:
+        st.header("1. Caricamento Dati e Pulizia")
         
-        # A. Caricamento Excel
-        uploaded_file = st.file_uploader("Carica Excel Esterno", type=['xlsx', 'csv'])
-        if uploaded_file:
-            excel_name = st.text_input("Nome Tabella Excel", "Budget_Esterno")
-            excel_domain = st.selectbox("Dominio Excel", ["Finance", "Sales", "HR"])
-            if st.button("Carica Excel"):
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    df = pd.read_excel(uploaded_file)
-                manager.add_dataframe(excel_name, df, excel_domain, excel_name)
-                st.success(f"Caricato {excel_name}")
-
-        st.divider()
-
-        # B. Connessione SAP (Simulata)
-        sap_view = st.text_input("Nome CDS View SAP", "I_BillingDocument")
-        sap_domain = st.selectbox("Dominio SAP", ["Sales", "Logistics", "Finance"])
-        if st.button("Connetti a SAP"):
-            df_sap = fetch_sap_cds_view(sap_view)
-            manager.add_dataframe(sap_view, df_sap, sap_domain, sap_view)
-            st.success(f"Importata {sap_view}")
-
-    # --- MAIN AREA: DEFINIZIONE JOIN ---
-    st.header("2. Data Modeling & Join")
-    
-    tables = manager.get_all_tables()
-    if len(tables) < 2:
-        st.info("Carica almeno due tabelle (es. SAP e Excel) per iniziare il join.")
-        return
-
-    col1, col2 = st.columns(2)
-    with col1:
-        table_left = st.selectbox("Tabella Sinistra (Left)", list(tables.keys()))
-    with col2:
-        table_right = st.selectbox("Tabella Destra (Right)", [t for t in tables.keys() if t != table_left])
-
-    # Smart Suggestion
-    df_L = manager.get_data(table_left)
-    df_R = manager.get_data(table_right)
-    
-    suggestions = suggest_join_keys(df_L, df_R)
-    
-    st.subheader("🔗 Configurazione Join")
-    
-    if suggestions:
-        st.markdown(f"**💡 L'AI suggerisce:** Join tra `{suggestions[0][0]}` e `{suggestions[0][1]}`")
-        default_idx_L = list(df_L.columns).index(suggestions[0][0])
-        default_idx_R = list(df_R.columns).index(suggestions[0][1])
-    else:
-        default_idx_L = 0
-        default_idx_R = 0
-
-    c1, c2, c3 = st.columns(3)
-    key_left = c1.selectbox("Campo Chiave Sinistra", df_L.columns, index=default_idx_L)
-    join_type = c2.selectbox("Tipo di Join", ["inner", "left", "right", "outer"])
-    key_right = c3.selectbox("Campo Chiave Destra", df_R.columns, index=default_idx_R)
-
-    if st.button("Esegui Join"):
-        try:
-            # Esecuzione del Merge
-            result_df = pd.merge(df_L, df_R, left_on=key_left, right_on=key_right, how=join_type)
-            st.session_state['last_result'] = result_df
-            st.success("Join eseguito con successo!")
-        except Exception as e:
-            st.error(f"Errore nel join: {e}")
-
-    # --- AREA: REPORTING & ANALISI ---
-    if 'last_result' in st.session_state:
-        st.divider()
-        st.header("3. Reporting Dinamico")
+        # Gestione Caricamento Massivo Excel e CDS View
+        col_files, col_join = st.columns(2)
         
-        df_res = st.session_state['last_result']
-
-        # Filtri Dinamici
-        with st.expander("🛠 Opzioni Filtri e Raggruppamento"):
-            filter_col = st.selectbox("Filtra per colonna:", ["Nessuno"] + list(df_res.columns))
-            if filter_col != "Nessuno":
-                unique_vals = df_res[filter_col].unique()
-                selected_vals = st.multiselect(f"Valori per {filter_col}", unique_vals, default=unique_vals)
-                df_res = df_res[df_res[filter_col].isin(selected_vals)]
+        with col_files:
+            st.subheader("Carica Sorgenti")
+            uploaded_files = st.file_uploader("Carica File Excel/CSV (multiplo)", type=['xlsx', 'csv'], accept_multiple_files=True)
             
-            # Group By opzionale
-            groupby_col = st.selectbox("Raggruppa per (Somma metriche):", ["Nessuno"] + list(df_res.columns))
+            # --- Logica per la CDS View (Opzionale) ---
+            sap_view = st.text_input("Nome CDS View SAP (Opzionale)", "I_BillingDoc")
+            if st.button("Carica CDS View"):
+                df_sap = fetch_sap_cds_view(sap_view)
+                manager.add_dataframe(sap_view, df_sap, "SAP Sales", sap_view)
+                st.success(f"Importata CDS View: {sap_view}")
 
-        # Calcolo aggregazioni se richiesto
-        if groupby_col != "Nessuno":
-            # Seleziona solo colonne numeriche per la somma
-            numeric_cols = df_res.select_dtypes(include=['number']).columns
-            df_display = df_res.groupby(groupby_col)[numeric_cols].sum().reset_index()
+        with col_join:
+            st.subheader("Unione Excel e Metadata")
+            
+            if uploaded_files:
+                # Caricamento e unione dei file Excel
+                all_excel_dfs = []
+                st.info(f"Caricati {len(uploaded_files)} file. Seleziona le colonne comuni e assegna il nome al risultato.")
+                
+                # Prende le colonne dal primo file per suggerire l'unione
+                temp_df = pd.read_excel(uploaded_files[0]) if uploaded_files[0].name.endswith('.xlsx') else pd.read_csv(uploaded_files[0])
+                
+                # Campo chiave per l'unione verticale (CONCAT)
+                join_col = st.selectbox("Colonna da usare come chiave comune per l'unione verticale (Concatenazione)", 
+                                        temp_df.columns.tolist(), 
+                                        index=0)
+                
+                final_excel_name = st.text_input("Nome Tabella Unita (Excel)", "Dati_Excel_Uniti")
+                final_excel_domain = st.selectbox("Dominio Tabella Unita", ["Finance", "Sales", "HR"])
+
+                if st.button("Unisci File Excel"):
+                    try:
+                        for uploaded_file in uploaded_files:
+                            if uploaded_file.name.endswith('.xlsx'):
+                                df = pd.read_excel(uploaded_file)
+                            else:
+                                df = pd.read_csv(uploaded_file)
+                            
+                            # Verifica che la colonna chiave esista in tutti i file prima di unire
+                            if join_col in df.columns:
+                                all_excel_dfs.append(df)
+                            else:
+                                st.warning(f"File {uploaded_file.name} ignorato: manca la colonna '{join_col}'.")
+                                
+                        if all_excel_dfs:
+                            result_df = pd.concat(all_excel_dfs, ignore_index=True)
+                            manager.add_dataframe(final_excel_name, result_df, final_excel_domain, final_excel_name)
+                            st.success(f"Uniti {len(all_excel_dfs)} file in '{final_excel_name}'.")
+                        else:
+                            st.error("Nessun file Excel è stato unito.")
+                    except Exception as e:
+                        st.error(f"Errore durante l'unione: {e}")
+
+
+        st.divider()
+        st.subheader("Anteprima e Pre-analisi Dati")
+        
+        current_tables = list(manager.get_all_tables().keys())
+        if current_tables:
+            selected_table = st.selectbox("Seleziona la tabella da visualizzare/modificare:", current_tables)
+            df_preview = manager.get_data(selected_table).copy()
+
+            # Modifica Inline e Filtri
+            with st.expander(f"🛠 Modifica, Filtri e Aggregazioni per {selected_table}"):
+                
+                # Modifica Inline (Streamlit Data Editor)
+                st.markdown("**Modifica Dati (doppio click):**")
+                df_edited = st.data_editor(df_preview, use_container_width=True)
+                
+                if st.button(f"Salva Modifiche per {selected_table}"):
+                    # Sostituisci il dataframe originale con la versione modificata
+                    manager.add_dataframe(selected_table, df_edited, 
+                                          manager.get_all_tables()[selected_table]['domain'],
+                                          manager.get_all_tables()[selected_table]['alias'])
+                    st.success(f"Modifiche salvate per {selected_table}.")
+                
+                st.markdown("---")
+                
+                # Filtri e Somme (Pre-analisi)
+                col_filt, col_sum = st.columns(2)
+                
+                with col_filt:
+                    filter_col = st.selectbox("Filtra riga per colonna:", ["Nessuno"] + list(df_edited.columns))
+                    if filter_col != "Nessuno":
+                        unique_vals = df_edited[filter_col].unique()
+                        selected_vals = st.multiselect(f"Valori da mantenere in {filter_col}", unique_vals, default=unique_vals)
+                        df_edited = df_edited[df_edited[filter_col].isin(selected_vals)]
+                        st.dataframe(df_edited)
+
+                with col_sum:
+                    numeric_cols = df_edited.select_dtypes(include=['number']).columns
+                    sum_col = st.selectbox("Calcola Somma per colonna:", ["Nessuno"] + list(numeric_cols))
+                    if sum_col != "Nessuno":
+                        st.metric(f"Totale di {sum_col}", f"{df_edited[sum_col].sum():,.2f}")
+
         else:
-            df_display = df_res
+            st.info("Nessuna tabella caricata. Inizia caricando un file Excel o una CDS View.")
 
-        # Visualizzazione Tabella
-        st.dataframe(df_display, use_container_width=True)
+    # =========================================================================
+    # TAB 2: DATA MODELING & JOIN
+    # =========================================================================
+    with tab_modeling:
+        st.header("2. Data Modeling & Join")
+        
+        tables = manager.get_all_tables()
+        if len(tables) < 2:
+            st.info("Carica almeno due tabelle per definire un Join.")
+            
+        else:
+            col1, col2 = st.columns(2)
+            table_left = col1.selectbox("Tabella Sinistra (Left)", list(tables.keys()))
+            table_right = col2.selectbox("Tabella Destra (Right)", [t for t in tables.keys() if t != table_left])
+            
+            df_L = manager.get_data(table_left)
+            df_R = manager.get_data(table_right)
+            
+            suggestions = suggest_join_keys(df_L, df_R)
+            
+            st.subheader("🔗 Configurazione Join")
+            
+            # Logica per suggerimenti predefinita
+            default_key_left = suggestions[0][0] if suggestions else df_L.columns[0]
+            default_key_right = suggestions[0][1] if suggestions else df_R.columns[0]
+            
+            if suggestions:
+                st.markdown(f"**💡 L'AI suggerisce:** Join tra `{default_key_left}` e `{default_key_right}` (Score: {suggestions[0][2]}%)")
 
-        # Download
-        csv = df_display.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Scarica Report CSV", csv, "report.csv", "text/csv")
+            c1, c2, c3 = st.columns(3)
+            key_left = c1.selectbox("Campo Chiave Sinistra", df_L.columns, index=df_L.columns.get_loc(default_key_left) if default_key_left in df_L.columns else 0)
+            join_type = c2.selectbox("Tipo di Join", ["inner", "left", "right", "outer"])
+            key_right = c3.selectbox("Campo Chiave Destra", df_R.columns, index=df_R.columns.get_loc(default_key_right) if default_key_right in df_R.columns else 0)
+
+            result_name = st.text_input("Nome del Risultato del Join", "JOIN_Risultato")
+
+            if st.button("Esegui Join e Salva"):
+                try:
+                    result_df = pd.merge(df_L, df_R, left_on=key_left, right_on=key_right, how=join_type)
+                    # Aggiunge il risultato unito come nuova tabella gestita
+                    manager.add_dataframe(result_name, result_df, "Joined Data", result_name)
+                    st.session_state['last_result_name'] = result_name # Per la Tab 3
+                    st.success(f"Join eseguito con successo! Risultato salvato come '{result_name}'.")
+                except Exception as e:
+                    st.error(f"Errore nel join: {e}")
+
+    # =========================================================================
+    # TAB 3: FINAL REPORTING & ANALYSIS
+    # =========================================================================
+    with tab_reporting:
+        st.header("3. Reporting e Analisi Finale")
+        
+        # Seleziona il risultato della join o un'altra tabella
+        report_tables = list(manager.get_all_tables().keys())
+        if 'last_result_name' in st.session_state and st.session_state['last_result_name'] in report_tables:
+            default_idx = report_tables.index(st.session_state['last_result_name'])
+        else:
+            default_idx = 0
+            
+        if report_tables:
+            df_final_name = st.selectbox("Seleziona il dataset per il Report:", report_tables, index=default_idx)
+            df_res = manager.get_data(df_final_name).copy()
+            
+            st.subheader(f"Report: {df_final_name}")
+            
+            # --- Filtri, Raggruppamento e Somme sulla Tabella Finale ---
+            with st.expander("🛠 Opzioni Filtri, Raggruppamento e Calcoli"):
+                
+                # Filtri Dinamici
+                filter_col = st.selectbox("Filtra Report per colonna:", ["Nessuno"] + list(df_res.columns))
+                if filter_col != "Nessuno":
+                    unique_vals = df_res[filter_col].unique()
+                    selected_vals = st.multiselect(f"Valori per {filter_col}", unique_vals, default=unique_vals)
+                    df_res = df_res[df_res[filter_col].isin(selected_vals)]
+                
+                col_group, col_agg = st.columns(2)
+                
+                with col_group:
+                    # Group By opzionale
+                    groupby_col = st.selectbox("Raggruppa Report per:", ["Nessuno"] + list(df_res.columns))
+
+                with col_agg:
+                    numeric_cols = df_res.select_dtypes(include=['number']).columns
+                    # Scegliere la colonna metrica per l'aggregazione
+                    metric_col = st.selectbox("Colonna Metrica per Somma/Aggregazione", ["Nessuno"] + list(numeric_cols))
+            
+            # Calcolo aggregazioni se richiesto
+            if groupby_col != "Nessuno" and metric_col != "Nessuno":
+                # Esegui Group By e Somma
+                df_display = df_res.groupby(groupby_col)[metric_col].sum().reset_index()
+                df_display = df_display.rename(columns={metric_col: f'SUM_{metric_col}'})
+            else:
+                # Se non c'è raggruppamento, mostra i dati filtrati
+                df_display = df_res
+
+            # Visualizzazione Tabella Dinamica
+            st.dataframe(df_display, use_container_width=True)
+
+            # Download
+            csv = df_display.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Scarica Report CSV", csv, "final_report.csv", "text/csv")
+        
+        else:
+            st.info("Nessun dato finale disponibile per il report. Esegui prima un Join o carica una tabella.")
 
 if __name__ == "__main__":
     main()
